@@ -1,0 +1,21 @@
+{
+    "name": "oliverhader/rebase",
+    "require": {
+        "fabpot/php-cs-fixer": "^1.10"
+    },
+    "authors": [
+        {
+            "name": "Oliver Hader",
+            "email": "oliver@typo3.org"
+        }
+    ],
+    "config": {
+        "optimize-autoloader": true,
+        "bin-dir": "bin"
+    },
+    "autoload": {
+        "psr-4": {
+            "OliverHader\\Rebase\\": "src/"
+        }
+    }
+}
