@@ -6,21 +6,23 @@ use OliverHader\Rebase\Exceptions;
 class Controller {
 
 #	const QUERY = 'ssh review.typo3.org "gerrit query" %s status:%s project:%s branch:%s change:39901';
-#	const QUERY = 'ssh review.typo3.org "gerrit query" %s status:%s project:%s branch:%s change:43915';
-	const QUERY = 'ssh review.typo3.org "gerrit query" %s status:%s project:%s branch:%s owner:oliver@typo3.org';
+#	const QUERY = 'ssh review.typo3.org "gerrit query" %s status:%s project:%s branch:%s owner:oliver@typo3.org';
+	const QUERY = 'ssh review.typo3.org "gerrit query" %s status:%s project:%s branch:%s';
 	const QUERY_STATUS = 'open';
 	const QUERY_PROJECT = 'Packages/TYPO3.CMS';
 	const QUERY_OPTIONS = '--format JSON --current-patch-set --all-approvals';
 
 	const FETCH = 'git fetch --quiet %s%s %s && git log -1 --pretty=format:%%H FETCH_HEAD^';
 	const FETCH_REPOSITORY = 'git://git.typo3.org/';
+	const FETCH_MESSAGE = 'git log -1 --format=%%B %s > .git/COMMIT_TMPMSG';
 	const SHOW_NAMES = 'git show --name-status --pretty="format:" %s';
 	const STATUS = 'git status -s';
 
 	const LOG = 'git log --pretty=format:%%H %s^';
 	const LASTCOMMIT = 'git log -1 --pretty=format:%H';
 	const CHERRYPICK = 'git cherry-pick -X %s %s';
-	const COMMIT = 'git commit --no-edit -q';
+	const COMMIT = 'git commit -q --no-edit';
+	const COMMIT_MESSAGE = 'git commit -q --file .git/COMMIT_TMPMSG';
 	const COMMIT_AMEND = 'git commit -a --amend --no-edit -q';
 	const REMOVE = 'git rm %s';
 	const RESET = 'git reset --quiet --hard %s && git clean --quiet -df';
@@ -144,9 +146,9 @@ class Controller {
 							throw $exception;
 						}
 						$this->remove($statusFiles->delete);
-						$this->commit();
+						$this->fetchMessage($change->currentPatchSet->lastCommit);
+						$this->commitMessage();
 					}
-					die();
 					$this->pushChange($change);
 					#$this->setApprovals($change->currentPatchSet);
 					$this->show('done', TRUE, FALSE);
@@ -400,6 +402,11 @@ class Controller {
 		return $this->fetchLastCommit();
 	}
 
+	protected function commitMessage() {
+		$this->executeCommand(self::COMMIT_MESSAGE, TRUE);
+		return $this->fetchLastCommit();
+	}
+
 	protected function commitAmend() {
 		$this->executeCommand(self::COMMIT_AMEND, TRUE);
 		return $this->fetchLastCommit();
@@ -427,6 +434,20 @@ class Controller {
 		$command = sprintf(
 			self::REMOVE,
 			$fileName
+		);
+		return $command;
+	}
+
+	protected function fetchMessage($revision = 'HEAD') {
+		$this->executeCommand(
+			$this->getFetchMessageCommand($revision)
+		);
+	}
+
+	protected function getFetchMessageCommand($revision) {
+		$command = sprintf(
+			self::FETCH_MESSAGE,
+			$revision
 		);
 		return $command;
 	}
