@@ -556,7 +556,7 @@ class Controller {
 		$command = sprintf(
 			self::PUSH,
 			$this->branch,
-			($change->topic ? '/' . $change->topic : '')
+			''
 		);
 		return $command;
 	}
