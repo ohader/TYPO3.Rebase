@@ -63,7 +63,12 @@ class Controller {
 	/**
 	 * @var array
 	 */
-	protected $log = array();
+	protected $commitLog = array();
+
+	/**
+	 * @var array
+	 */
+	protected $headLog = array();
 
 	/**
 	 * @var boolean
@@ -72,12 +77,12 @@ class Controller {
 
 	/**
 	 * @param string $branch
-	 * @param string $head
-	 * @param string $commit
+	 * @param string $headRevision
+	 * @param string $commitRevision
 	 * @return Controller
 	 */
-	static public function create($branch, $head, $commit) {
-		return new Controller($branch, $head, $commit);
+	static public function create($branch, $headRevision, $commitRevision) {
+		return new Controller($branch, $headRevision, $commitRevision);
 	}
 
 	/**
@@ -85,13 +90,13 @@ class Controller {
 	 * @param string $head
 	 * @param string $commit
 	 */
-	public function __construct($branch, $head, $commit) {
+	public function __construct($branch, $headRevision, $commitRevision) {
 		$this->consoleInput = new \Symfony\Component\Console\Input\ArrayInput(array());
 		$this->consoleOutput = new \Symfony\Component\Console\Output\NullOutput();
 
 		$this->branch = (string)$branch;
-		$this->head = (string)$head;
-		$this->commit = (string)$commit;
+		$this->headRevision = (string)$headRevision;
+		$this->commitRevision = (string)$commitRevision;
 
 		if (is_resource(STDERR)) {
 			fclose(STDERR);
@@ -100,7 +105,8 @@ class Controller {
 
 	public function run() {
 		try {
-			$this->fetchLog();
+			$this->fetchCommitLog();
+			$this->fetchHeadLog();
 			$this->receiveChanges();
 			$this->processChanges();
 		} catch (\Exception $exception) {
@@ -118,51 +124,58 @@ class Controller {
 
 		foreach ($this->changes as $change) {
 			$this->fetchPatchSet($change->currentPatchSet);
-			if ($this->isInLog($change->currentPatchSet->parent)) {
-				try {
-					$this->show('Rebasing change ' . $change->currentPatchSet->ref . '... ', FALSE);
-					try {
-						$this->resetRepositoryToHead();
-						$change->currentPatchSet->lastCommit = $this->cherryPick('FETCH_HEAD');
-						$this->show('is fine, skipping', TRUE, FALSE);
-						continue;
-					} catch (Exceptions\CherryPickException $exception) {
-						$this->resetRepositoryToPreviousCommit();
-						$change->currentPatchSet->lastCommit = $this->cherryPick('FETCH_HEAD');
-					}
-					$changeFiles = $this->showNames();
-					if ($changeFiles->updatable()) {
-						$this->show('CS... ', FALSE, FALSE);
-						$this->applyCodeSniffer($changeFiles->updatable());
-						$change->currentPatchSet->lastCommit = $this->commitAmend();
-					}
-					$this->resetRepositoryToHead();
-					try {
-						$this->cherryPick($change->currentPatchSet->lastCommit, 'theirs');
-					} catch (Exceptions\CherryPickException $exception) {
-						$statusFiles = $this->status();
-						$differentFiles = array_diff($statusFiles->unresolved, $statusFiles->delete);
-						if (!empty($differentFiles)) {
-							throw $exception;
-						}
-						$this->remove($statusFiles->delete);
-						$this->fetchMessage($change->currentPatchSet->lastCommit);
-						$this->commitMessage();
-					}
-					$this->pushChange($change);
-					#$this->setApprovals($change->currentPatchSet);
-					$this->show('done', TRUE, FALSE);
-				} catch (Exceptions\EmptyCommitException $exception) {
-					$this->show('! Problems on resolving commit content ' . $change->currentPatchSet->ref);
-				} catch (Exceptions\CherryPickException $exception) {
-					$this->show('! Problems on cherry-picking ' . $change->currentPatchSet->ref);
-				} catch (Exceptions\PushException $exception) {
-					$this->show('! Problems on pushing ' . $change->currentPatchSet->ref);
-				} catch (Exceptions\ApproveException $exception) {
-					$this->show('! Problems on approving ' . $change->currentPatchSet->ref);
-				}
-			} else {
+
+			if ($this->isInHeadLog($change->currentPatchSet->parent)
+				&& !$this->isInCommitLog($change->currentPatchSet->parent)) {
 				$this->show('.', FALSE, FALSE);
+				continue;
+			}
+
+			if (!$this->isInCommitLog($change->currentPatchSet->parent)) {
+				$this->show('Found change with unknown parent revision...');
+			}
+
+			try {
+				$this->show('Rebasing change ' . $change->currentPatchSet->ref . '... ', FALSE);
+				try {
+					$this->resetRepositoryToHead();
+					$change->currentPatchSet->lastCommit = $this->cherryPick('FETCH_HEAD');
+					$this->show('is fine, skipping', TRUE, FALSE);
+					continue;
+				} catch (Exceptions\CherryPickException $exception) {
+					$this->resetRepositoryToPreviousCommit();
+					$change->currentPatchSet->lastCommit = $this->cherryPick('FETCH_HEAD');
+				}
+				$changeFiles = $this->showNames();
+				if ($changeFiles->updatable()) {
+					$this->show('CS... ', FALSE, FALSE);
+					$this->applyCodeSniffer($changeFiles->updatable());
+					$change->currentPatchSet->lastCommit = $this->commitAmend();
+				}
+				$this->resetRepositoryToHead();
+				try {
+					$this->cherryPick($change->currentPatchSet->lastCommit, 'theirs');
+				} catch (Exceptions\CherryPickException $exception) {
+					$statusFiles = $this->status();
+					$differentFiles = array_diff($statusFiles->unresolved, $statusFiles->delete);
+					if (!empty($differentFiles)) {
+						throw $exception;
+					}
+					$this->remove($statusFiles->delete);
+					$this->fetchMessage($change->currentPatchSet->lastCommit);
+					$this->commitMessage();
+				}
+				$this->pushChange($change);
+				#$this->setApprovals($change->currentPatchSet);
+				$this->show('done', TRUE, FALSE);
+			} catch (Exceptions\EmptyCommitException $exception) {
+				$this->show('! Problems on resolving commit content ' . $change->currentPatchSet->ref);
+			} catch (Exceptions\CherryPickException $exception) {
+				$this->show('! Problems on cherry-picking ' . $change->currentPatchSet->ref);
+			} catch (Exceptions\PushException $exception) {
+				$this->show('! Problems on pushing ' . $change->currentPatchSet->ref);
+			} catch (Exceptions\ApproveException $exception) {
+				$this->show('! Problems on approving ' . $change->currentPatchSet->ref);
 			}
 		}
 	}
@@ -325,13 +338,13 @@ class Controller {
 
 	protected function resetRepositoryToHead() {
 		$this->executeCommand(
-			$this->getResetRepositoryCommand($this->head)
+			$this->getResetRepositoryCommand($this->headRevision)
 		);
 	}
 
 	protected function resetRepositoryToPreviousCommit() {
 		$this->executeCommand(
-			$this->getResetRepositoryCommand($this->commit . '^')
+			$this->getResetRepositoryCommand($this->commitRevision . '^')
 		);
 	}
 
@@ -352,7 +365,7 @@ class Controller {
 		);
 
 		if (!isset($response[0]) || strlen($response[0]) !== 40) {
-			throw new \RuntimeException('Invalid parent commit on ref ' . $patchSet->ref);
+			throw new \RuntimeException('Invalid parent commit "' . $response[0] . '" on ref ' . $patchSet->ref);
 		}
 
 		$patchSet->parent = $response[0];
@@ -562,10 +575,14 @@ class Controller {
 		return $command;
 	}
 
-	protected function getLogCommand() {
+	/**
+	 * @param string $revision
+	 * @return string
+	 */
+	protected function getLogCommand($revision) {
 		$command = sprintf(
 			self::LOG,
-			$this->commit
+			$revision
 		);
 		return $command;
 	}
@@ -582,26 +599,48 @@ class Controller {
 		return $response[0];
 	}
 
-	protected function fetchLog() {
-		$this->show('Fetching Git log data...');
+	protected function fetchCommitLog() {
+		$this->show('Fetching Git log data for "' . $this->commitRevision . '"...');
 
 		$log = $this->executeCommand(
-			$this->getLogCommand()
+			$this->getLogCommand($this->commitRevision)
 		);
 
 		if (is_array($log) === FALSE || count($log) === 0) {
-			throw new \RuntimeException('Log could not be fetched for commit ' . $this->commit);
+			throw new \RuntimeException('Log could not be fetched for commit ' . $this->commitRevision);
 		}
 
-		$this->log = $log;
+		$this->commitLog = $log;
+	}
+
+	protected function fetchHeadLog() {
+		$this->show('Fetching Git log data for "' . $this->headRevision . '"...');
+
+		$log = $this->executeCommand(
+			$this->getLogCommand($this->headRevision)
+		);
+
+		if (is_array($log) === FALSE || count($log) === 0) {
+			throw new \RuntimeException('Log could not be fetched for commit ' . $this->headRevision);
+		}
+
+		$this->headLog = $log;
 	}
 
 	/**
 	 * @param string $commit
 	 * @return boolean
 	 */
-	protected function isInLog($commit) {
-		return in_array($commit, $this->log, TRUE);
+	protected function isInCommitLog($commit) {
+		return in_array($commit, $this->commitLog, TRUE);
+	}
+
+	/**
+	 * @param string $commit
+	 * @return boolean
+	 */
+	protected function isInHeadLog($commit) {
+		return in_array($commit, $this->headLog, TRUE);
 	}
 
 	/**
